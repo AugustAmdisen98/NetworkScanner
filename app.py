@@ -25,7 +25,6 @@ PAGE = """
 <html lang="da">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{% if refresh_seconds %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
 <title>IP Sentinel</title>
 <style>
   :root { color-scheme: light; --line:#d7dde5; --soft:#f5f7fa; --bad:#fff0f0; --good:#eefbf1; }
@@ -44,6 +43,7 @@ PAGE = """
   .alarm { background: var(--bad); }
   .message { padding: 10px 12px; background: var(--soft); border-left: 4px solid #1f6feb; }
   .muted { color: #657282; }
+  .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); }
 </style>
 
 <h1>IP Sentinel</h1>
@@ -72,6 +72,7 @@ PAGE = """
 <p class="muted">Automatisk netværk bruger den aktive ethernet/wifi-forbindelse. Sæt interval til 0 for kun at scanne manuelt.</p>
 <p><strong>Scheduler:</strong> {{ scheduler_status }}</p>
 {% if next_scan_at %}<p class="muted">Næste planlagte scanning: {{ next_scan_at }}</p>{% endif %}
+{% if refresh_seconds %}<p class="muted">Auto-refresh er aktiv: siden opdaterer hvert <span class="pill">{{ refresh_seconds }}</span> sekund.</p>{% endif %}
 
 <h2>2. Reserverede IP-adresser</h2>
 <form method="post" action="{{ url_for('add_reserved') }}">
@@ -127,6 +128,13 @@ PAGE = """
   <tr><td colspan="5" class="muted">Loggen er tom.</td></tr>
   {% endfor %}
 </table>
+{% if refresh_seconds %}
+<script>
+  setTimeout(function () {
+    window.location.reload();
+  }, {{ refresh_seconds * 1000 }});
+</script>
+{% endif %}
 </html>
 """
 
@@ -363,7 +371,7 @@ def index():
     auto_network = _get_setting("network_mode", "auto") == "auto"
     network = _get_network()
     interval = _get_setting("interval", "0")
-    refresh_seconds = 30 if int(interval) > 0 else 0
+    refresh_seconds = 10 if int(interval) > 0 else 0
     message = request.args.get("message", "")
     with _connect() as db:
         reserved = db.execute("SELECT ip, name FROM reserved ORDER BY ip").fetchall()
