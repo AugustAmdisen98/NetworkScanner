@@ -25,6 +25,7 @@ PAGE = """
 <html lang="da">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{% if refresh_seconds %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
 <title>IP Sentinel</title>
 <style>
   :root { color-scheme: light; --line:#d7dde5; --soft:#f5f7fa; --bad:#fff0f0; --good:#eefbf1; }
@@ -69,6 +70,8 @@ PAGE = """
   <button class="secondary">Scan nu</button>
 </form>
 <p class="muted">Automatisk netværk bruger den aktive ethernet/wifi-forbindelse. Sæt interval til 0 for kun at scanne manuelt.</p>
+<p><strong>Scheduler:</strong> {{ scheduler_status }}</p>
+{% if next_scan_at %}<p class="muted">Næste planlagte scanning: {{ next_scan_at }}</p>{% endif %}
 
 <h2>2. Reserverede IP-adresser</h2>
 <form method="post" action="{{ url_for('add_reserved') }}">
@@ -236,6 +239,8 @@ def _setup_database():
         db.execute("INSERT OR IGNORE INTO settings (name, value) VALUES ('network_mode', 'auto')")
         db.execute("INSERT OR IGNORE INTO settings (name, value) VALUES ('network', ?)", (_detect_network(),))
         db.execute("INSERT OR IGNORE INTO settings (name, value) VALUES ('interval', '0')")
+        db.execute("INSERT OR IGNORE INTO settings (name, value) VALUES ('scheduler_status', 'Planlagt scanning er slået fra.')")
+        db.execute("INSERT OR IGNORE INTO settings (name, value) VALUES ('next_scan_at', '')")
 
 
 def _detect_network():
@@ -303,6 +308,15 @@ def _get_network():
     return _get_setting("network", _detect_network())
 
 
+def _set_scheduler_status(status, next_scan_at=""):
+    _set_setting("scheduler_status", status)
+    _set_setting("next_scan_at", next_scan_at)
+
+
+def _time_text(timestamp):
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _run_scan(network):
     with SCAN_LOCK:
         scanned = scan_network(network)
@@ -318,13 +332,21 @@ def _scheduler_loop():
         try:
             interval = int(_get_setting("interval", "0"))
             if interval > 0 and time.monotonic() >= next_scan:
+                started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                _set_scheduler_status(f"Scanner automatisk nu ({started_at}).")
                 _run_scan(_get_network())
                 next_scan = time.monotonic() + interval * 60
+                _set_scheduler_status("Planlagt scanning kører.", _time_text(time.time() + interval * 60))
             elif interval <= 0:
                 next_scan = 0.0
+                _set_scheduler_status("Planlagt scanning er slået fra.")
+            elif next_scan > 0:
+                _set_scheduler_status("Planlagt scanning kører.", _time_text(time.time() + max(0, next_scan - time.monotonic())))
         except Exception as error:
-            print(f"Planlagt scanning fejlede: {error}", flush=True)
+            message = f"Planlagt scanning fejlede: {error}"
+            print(message, flush=True)
             next_scan = time.monotonic() + 60
+            _set_scheduler_status(message, _time_text(time.time() + 60))
         time.sleep(5)
 
 
@@ -341,6 +363,7 @@ def index():
     auto_network = _get_setting("network_mode", "auto") == "auto"
     network = _get_network()
     interval = _get_setting("interval", "0")
+    refresh_seconds = 30 if int(interval) > 0 else 0
     message = request.args.get("message", "")
     with _connect() as db:
         reserved = db.execute("SELECT ip, name FROM reserved ORDER BY ip").fetchall()
@@ -356,6 +379,9 @@ def index():
         network=network,
         auto_network=auto_network,
         interval=interval,
+        refresh_seconds=refresh_seconds,
+        scheduler_status=_get_setting("scheduler_status", "Planlagt scanning er slået fra."),
+        next_scan_at=_get_setting("next_scan_at", ""),
         message=message,
     )
 
@@ -375,6 +401,10 @@ def save_settings():
         interval = max(0, int(request.form["interval"]))
         _set_setting("network", network)
         _set_setting("interval", str(interval))
+        if interval > 0:
+            _set_scheduler_status("Planen er gemt. Første automatiske scanning starter inden for få sekunder.")
+        else:
+            _set_scheduler_status("Planlagt scanning er slået fra.")
         message = "Planen er gemt."
     except ValueError as error:
         message = f"Fejl: {error}"
