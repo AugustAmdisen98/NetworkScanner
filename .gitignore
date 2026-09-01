@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+data/*.db
+data/*.db-shm
+data/*.db-wal
+.tmp_assignment_render/
+scanner.db
