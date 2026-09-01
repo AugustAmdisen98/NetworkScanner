@@ -65,9 +65,20 @@ def setup():
         db.execute("CREATE TABLE IF NOT EXISTS devices (ip TEXT PRIMARY KEY, mac TEXT, seen TEXT, approved INTEGER)")
 
 
+def detect_network():
+    """Find automatisk det aktive lokale /24-netværk via Scapy."""
+    try:
+        from scapy.all import conf
+
+        _, local_ip, _ = conf.route.route("0.0.0.0")
+        return str(ipaddress.ip_network(f"{local_ip}/24", strict=False))
+    except Exception:
+        return "192.168.1.0/24"
+
+
 @app.get("/")
 def index():
-    network = request.args.get("network", "192.168.1.0/24")
+    network = request.args.get("network") or detect_network()
     message = request.args.get("message", "")
     with sqlite3.connect(DB) as db:
         reserved = db.execute("SELECT * FROM reserved ORDER BY ip").fetchall()
